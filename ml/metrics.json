@@ -1,0 +1,78 @@
+{
+  "features": [
+    "temperature",
+    "humidity",
+    "air_quality_ppm",
+    "occupancy",
+    "light_lux",
+    "temp_slope",
+    "aq_slope",
+    "hum_slope"
+  ],
+  "classes": [
+    "SAFE",
+    "WARNING",
+    "CRITICAL"
+  ],
+  "horizon_minutes": 10,
+  "train_rows": 100790,
+  "test_rows": 28800,
+  "architecture": [
+    8,
+    16,
+    8,
+    3
+  ],
+  "parameters": 307,
+  "model_bytes": 1228,
+  "results": {
+    "Logistic Regression": {
+      "accuracy": 0.951,
+      "macro_f1": 0.9089,
+      "recall_critical": 0.8682,
+      "precision_critical": 0.8794
+    },
+    "Decision Tree (depth 8)": {
+      "accuracy": 0.9801,
+      "macro_f1": 0.9561,
+      "recall_critical": 0.9491,
+      "precision_critical": 0.9047
+    },
+    "Neural Network MLP (16, 8)": {
+      "accuracy": 0.976,
+      "macro_f1": 0.941,
+      "recall_critical": 0.9591,
+      "precision_critical": 0.834
+    },
+    "Threshold rules (current reading only)": {
+      "accuracy": 0.9259,
+      "macro_f1": 0.881,
+      "recall_critical": 0.8155,
+      "precision_critical": 1.0
+    }
+  },
+  "confusion_matrix_mlp": [
+    [
+      21628,
+      223,
+      2
+    ],
+    [
+      213,
+      5426,
+      208
+    ],
+    [
+      9,
+      36,
+      1055
+    ]
+  ],
+  "early_warning": {
+    "critical_episodes_in_test": 22,
+    "ml_predicted_before_onset_pct": 100.0,
+    "ml_median_lead_minutes": 9.5,
+    "ml_mean_lead_minutes": 9.59,
+    "rules_critical_lead_minutes": 0.0
+  }
+}

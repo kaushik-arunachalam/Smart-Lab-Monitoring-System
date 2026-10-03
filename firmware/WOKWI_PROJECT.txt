@@ -1,0 +1,6 @@
+Saved Wokwi project (same code as this folder):
+https://wokwi.com/projects/476557350477755393
+
+Files in the Wokwi project: sketch.ino, model.h, diagram.json, libraries.txt
+If you change the code here, paste it into Wokwi and click SAVE there too
+(or change it in Wokwi and copy it back here) so both stay the same.

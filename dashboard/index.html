@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Lab Monitor</title>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script src="ml_model.js"></script>
+<style>
+  :root {
+    --bg: #f6f1e9; --surface: #fffdf9; --surface-2: #f1ebe1; --border: #e4dacb;
+    --ink: #2b2118; --ink-2: #6b5b4b; --ink-3: #9a8a78;
+    --accent: #b08a4f; --accent-2: #8a6a38;
+    --good: #0ca30c; --warning: #fab219; --critical: #d03b3b;
+    --good-bg: #e7f4e4; --warning-bg: #fdf1d6; --critical-bg: #fbe4e1;
+    --s-temp: #b08a4f; --s-hum: #3d6fb6; --s-air: #7a5ea8; --s-light: #c9772b;
+    --grid: #ece4d8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17130f; --surface: #1f1a15; --surface-2: #29231c; --border: #3a3128;
+      --ink: #f3ece2; --ink-2: #c3b5a4; --ink-3: #8c7d6c;
+      --good-bg: #16301a; --warning-bg: #3a2e12; --critical-bg: #3d1a17;
+      --s-temp: #d4ad6c; --s-hum: #7ea6e6; --s-air: #a98fd6; --s-light: #e79a52; --grid: #2f2821;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17130f; --surface: #1f1a15; --surface-2: #29231c; --border: #3a3128;
+    --ink: #f3ece2; --ink-2: #c3b5a4; --ink-3: #8c7d6c;
+    --good-bg: #16301a; --warning-bg: #3a2e12; --critical-bg: #3d1a17;
+    --s-temp: #d4ad6c; --s-hum: #7ea6e6; --s-air: #a98fd6; --s-light: #e79a52; --grid: #2f2821;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 18px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between;
+           border-bottom: 2px solid var(--accent); padding-bottom: 10px; margin-bottom: 16px; }
+  h1 { margin: 0; font-size: 20px; letter-spacing: .04em; text-transform: uppercase; }
+  h1 small { display: block; font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-2); }
+  .conn { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  input[type=text], input[type=password] { background: var(--surface); color: var(--ink); border: 1px solid var(--border);
+         border-radius: 8px; padding: 6px 9px; font: inherit; width: 150px; }
+  button { font: inherit; border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+           border-radius: 8px; padding: 6px 11px; cursor: pointer; }
+  button:hover { background: var(--surface-2); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.on { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 4px 10px; border-radius: 999px;
+          background: var(--surface-2); color: var(--ink-2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
+  .pill.live .dot { background: var(--good); } .pill.demo .dot { background: var(--accent); }
+
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; min-width: 0; }
+  .card h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink-2); text-transform: uppercase; letter-spacing: .07em; }
+  .kpis { grid-column: span 12; display: grid; gap: 14px; grid-template-columns: repeat(6, 1fr); }
+  .kpi { text-align: center; }
+  .kpi svg.ic { width: 34px; height: 34px; color: var(--accent); }
+  .kpi .v { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .kpi .v small { font-size: 15px; color: var(--ink-2); font-weight: 500; }
+  .kpi .sub { font-size: 12px; color: var(--ink-3); }
+  .badge { display: inline-flex; gap: 6px; align-items: center; font-weight: 700; font-size: 18px; padding: 4px 12px; border-radius: 8px; margin-top: 6px; }
+  .badge.SAFE { background: var(--good-bg); color: var(--ink); border: 1px solid var(--good); }
+  .badge.WARNING { background: var(--warning-bg); color: var(--ink); border: 1px solid var(--warning); }
+  .badge.CRITICAL { background: var(--critical-bg); color: var(--ink); border: 1px solid var(--critical); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--critical) 25%, transparent); } }
+  @media (max-width: 980px) { .kpis { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 560px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+
+  .span-8 { grid-column: span 8; } .span-4 { grid-column: span 4; } .span-12 { grid-column: span 12; } .span-6 { grid-column: span 6; }
+  @media (max-width: 980px) { .span-8, .span-4, .span-6 { grid-column: span 12; } }
+
+  .ranges { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .ranges button { border: 0; border-radius: 0; padding: 4px 10px; font-size: 12px; }
+  .ranges button.on { background: var(--accent); color: #fff; }
+  .trend-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+  .mini { position: relative; margin-top: 6px; }
+  .mini .lbl { font-size: 12px; color: var(--ink-2); display: flex; justify-content: space-between; }
+  .mini .lbl b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .mini .sw { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  svg.chart { width: 100%; height: 78px; display: block; }
+  .tooltip { position: absolute; pointer-events: none; background: var(--ink); color: var(--surface); font-size: 12px;
+             padding: 5px 8px; border-radius: 6px; white-space: nowrap; transform: translate(-50%, -115%); opacity: 0; z-index: 2; }
+
+  .ai-main { display: flex; align-items: center; gap: 12px; }
+  .ai-main .big { font-size: 22px; font-weight: 700; }
+  .bars { margin-top: 10px; display: grid; gap: 6px; }
+  .bar { display: grid; grid-template-columns: 78px 1fr 44px; gap: 8px; align-items: center; font-size: 13px; }
+  .bar .track { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+  .bar .track span { display: block; height: 100%; border-radius: 4px; transition: width .4s; }
+  .ai-note { font-size: 12px; color: var(--ink-3); margin-top: 8px; }
+  .early { display: none; margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--warning-bg); border: 1px solid var(--warning); font-size: 13px; }
+  .early.show { display: block; }
+
+  .notif { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; background: var(--good-bg); }
+  .notif.WARNING { background: var(--warning-bg); } .notif.CRITICAL { background: var(--critical-bg); }
+  .notif svg { width: 30px; height: 30px; flex: none; }
+  .notif b { font-size: 15px; }
+  .log { list-style: none; margin: 10px 0 0; padding: 0; max-height: 190px; overflow: auto; font-size: 13px; }
+  .log li { display: flex; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .log time { color: var(--ink-3); flex: none; font-variant-numeric: tabular-nums; }
+  .tag { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; flex: none; height: fit-content; background: var(--surface-2); }
+  .tag.WARNING { background: var(--warning-bg); } .tag.CRITICAL { background: var(--critical-bg); } .tag.SAFE { background: var(--good-bg); }
+  .tag.AI { background: var(--accent); color: #fff; }
+
+  .oled { background: #0b0b0b; border-radius: 12px; padding: 12px; border: 6px solid #222; box-shadow: inset 0 0 0 2px #333; }
+  .oled pre { margin: 0; color: #d9f2ff; font: 13px/1.35 Consolas, "Courier New", monospace; white-space: pre; overflow: hidden; }
+  .oled pre .inv { background: #d9f2ff; color: #0b0b0b; }
+  .indicators { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+  .ind { text-align: center; background: var(--surface-2); border-radius: 10px; padding: 8px 4px; font-size: 12px; }
+  .ind svg { width: 26px; height: 26px; color: var(--ink-3); }
+  .ind.on svg { color: var(--accent); }
+  .ind b { display: block; font-size: 12px; } .ind span { font-size: 11px; color: var(--ink-2); }
+  .spin { animation: spin 1s linear infinite; transform-origin: 50% 50%; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .demo-bar { display: none; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .demo-bar.show { display: flex; }
+  details { margin-top: 10px; } summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+  .settings { display: grid; gap: 8px; margin-top: 8px; font-size: 13px; }
+  .settings label { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; } td, th { padding: 3px 6px; border-bottom: 1px solid var(--border); text-align: left; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Smart Laboratory Environment Monitoring System<small>Real-time monitoring · AI-driven safety prediction · IoT alerts</small></h1>
+    <div class="conn">
+      <span class="pill" id="connPill"><span class="dot"></span><span id="connText">Offline</span></span>
+      <input id="deviceId" type="text" value="smartlab-cse24" aria-label="Device ID" title="Must match DEVICE_ID in firmware">
+      <button class="primary" id="btnConnect">Connect</button>
+      <button id="btnDemo">Demo mode</button>
+      <button id="btnTheme" aria-label="Toggle theme" title="Toggle theme">◐</button>
+    </div>
+  </header>
+
+  <div class="card span-12 demo-bar" id="demoBar" style="margin-bottom:14px">
+    <b>Demo scenarios:</b>
+    <button data-ev="session">Lab session (students enter)</button>
+    <button data-ev="chemical">Chemical fumes</button>
+    <button data-ev="hvac">AC failure (heat)</button>
+    <button data-ev="lights">Lights fail</button>
+    <button data-ev="clear">Everyone leaves</button>
+    <span style="font-size:12px;color:var(--ink-3)">1 second = 1 lab minute · the same neural network as the ESP32 runs here</span>
+  </div>
+
+  <div class="grid">
+    <div class="kpis">
+      <div class="card kpi"><h3>Temperature</h3>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/></svg>
+        <div class="v" id="kTemp">--<small>°C</small></div><div class="sub" id="kTempT">trend --</div></div>
+      <div class="card kpi"><h3>Humidity</h3>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></svg>
+        <div class="v" id="kHum">--<small>%</small></div><div class="sub">safe 30–60 %</div></div>
+      <div class="card kpi"><h3>Air quality</h3>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h8"/></svg>
+        <div class="v" id="kAir">--</div><div class="sub" id="kAirP">-- ppm CO₂-eq</div></div>
+      <div class="card kpi"><h3>Occupancy</h3>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.3"/><path d="M16 14.2c2.8.3 5 2.6 5 5.8"/></svg>
+        <div class="v" id="kOcc">--</div><div class="sub">PIR motion sensor</div></div>
+      <div class="card kpi"><h3>Light</h3>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.8.8 1 1.5 1 2.5h6c0-1 .2-1.7 1-2.5A6 6 0 0 0 12 3z"/></svg>
+        <div class="v" id="kLux">--<small>lx</small></div><div class="sub">LDR ambient light</div></div>
+      <div class="card kpi"><h3>Status</h3>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+        <div><span class="badge" id="kStatus">--</span></div><div class="sub" id="kReason">&nbsp;</div></div>
+    </div>
+
+    <div class="card span-8">
+      <div class="trend-head">
+        <h3 style="margin:0">Environmental trends</h3>
+        <div class="ranges" id="ranges">
+          <button data-r="3600" class="on">1H</button><button data-r="21600">6H</button>
+          <button data-r="86400">24H</button><button data-r="604800">7D</button>
+        </div>
+      </div>
+      <div id="charts"></div>
+      <details><summary>Data table &amp; export</summary>
+        <div style="display:flex;gap:8px;margin:8px 0"><button id="btnCsv">Export CSV (for ML retraining)</button><button id="btnClear">Clear local history</button></div>
+        <div id="tableWrap" style="max-height:200px;overflow:auto"></div>
+      </details>
+    </div>
+
+    <div class="card span-4">
+      <h3>AI safety prediction · next 10 minutes</h3>
+      <div class="ai-main">
+        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"><path d="M9 3a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 3 3h1V3zM15 3a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-3 3h-1V3z"/></svg>
+        <div><div class="big" id="aiPred">--</div><div style="font-size:12px;color:var(--ink-2)" id="aiConf">confidence --</div></div>
+      </div>
+      <div class="bars">
+        <div class="bar"><span>Safe</span><div class="track"><span id="pSafe" style="background:var(--good);width:0"></span></div><b id="pSafeT">--</b></div>
+        <div class="bar"><span>Warning</span><div class="track"><span id="pWarn" style="background:var(--warning);width:0"></span></div><b id="pWarnT">--</b></div>
+        <div class="bar"><span>Critical</span><div class="track"><span id="pCrit" style="background:var(--critical);width:0"></span></div><b id="pCritT">--</b></div>
+      </div>
+      <div class="early" id="earlyBox">⚠ <b>Early warning:</b> the model expects CRITICAL conditions within 10 minutes. Exhaust fan started pre-emptively.</div>
+      <div class="ai-note">On-device neural network (8→16→8→3, 1.2 KB) using current readings and 10-minute trends.</div>
+    </div>
+
+    <div class="card span-4">
+      <h3>Notification</h3>
+      <div class="notif" id="notif">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg>
+        <div><b id="notifTitle">Waiting for data</b><div style="font-size:12px;color:var(--ink-2)" id="notifTime">--</div></div>
+      </div>
+      <ul class="log" id="log"></ul>
+    </div>
+
+    <div class="card span-4">
+      <h3>OLED display (live mirror)</h3>
+      <div class="oled"><pre id="oled">
+ Smart Lab Monitor
+
+   waiting...</pre></div>
+      <div class="indicators">
+        <div class="ind" id="iWifi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1"/></svg><b>Wi-Fi</b><span>--</span></div>
+        <div class="ind" id="iFan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><g id="fanG"><path d="M12 12c0-4 1-7 3-7s2 3-3 7z"/><path d="M12 12c4 0 7 1 7 3s-3 2-7-3z"/><path d="M12 12c0 4-1 7-3 7s-2-3 3-7z"/><path d="M12 12c-4 0-7-1-7-3s3-2 7 3z"/></g></svg><b>Fan</b><span>--</span></div>
+        <div class="ind" id="iBuzz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg><b>Buzzer</b><span>--</span></div>
+        <div class="ind" id="iCloud"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 18a5 5 0 1 1 1-9.9A6 6 0 0 1 19 10a4 4 0 0 1 0 8z"/><path d="m12 16v-5m-2 2 2-2 2 2"/></svg><b>Cloud</b><span>--</span></div>
+      </div>
+    </div>
+
+    <div class="card span-4">
+      <h3>Control &amp; settings</h3>
+      <div class="controls">
+        <button id="cFan">Fan: force ON</button>
+        <button id="cMute">Mute buzzer 60 s</button>
+        <button id="cTest">Self-test</button>
+      </div>
+      <label style="display:flex;gap:6px;align-items:center;margin-top:10px;font-size:13px"><input type="checkbox" id="soundOn" checked> Alarm sound + browser notification on CRITICAL</label>
+      <details><summary>Cloud database (ThingSpeak history)</summary>
+        <div class="settings">
+          <label>Channel ID <input type="text" id="tsChannel" placeholder="e.g. 2712345"></label>
+          <label>Read API key <input type="password" id="tsKey" placeholder="optional for public"></label>
+          <button id="btnTs">Load cloud history</button>
+          <span style="color:var(--ink-3)">Fields: 1 temp · 2 humidity · 3 air ppm · 4 occupancy · 5 lux · 6 status · 7 AI class · 8 P(critical)</span>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const CLASSES = ['SAFE', 'WARNING', 'CRITICAL'];
+  const SERIES = [
+    { key: 'temp', name: 'Temperature', unit: '°C', color: '--s-temp', lo: 18, hi: 27, fmt: v => v.toFixed(1) },
+    { key: 'hum', name: 'Humidity', unit: '%', color: '--s-hum', lo: 30, hi: 60, fmt: v => v.toFixed(0) },
+    { key: 'aq', name: 'Air quality', unit: 'ppm', color: '--s-air', lo: null, hi: 1000, fmt: v => Math.round(v) },
+    { key: 'lux', name: 'Light', unit: 'lx', color: '--s-light', lo: null, hi: null, fmt: v => Math.round(v) },
+  ];
+  let mode = 'off', client = null, deviceId = '', range = 3600, last = null, lastStatus = null, lastEarly = false;
+  let history = [];            // {t, temp, hum, aq, occ, lux, status, pred, pCrit}
+  let loggerSeen = 0, loggerRows = 0;
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  };
+  history = store.get('slm-history', []);
+  $('deviceId').value = store.get('slm-device', 'smartlab-cse24');
+  $('tsChannel').value = store.get('slm-ts-channel', '');
+  const theme = store.get('slm-theme', null); if (theme) document.documentElement.dataset.theme = theme;
+  $('btnTheme').onclick = () => {
+    const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+    store.set('slm-theme', document.documentElement.dataset.theme); drawCharts();
+  };
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+  // ------------------------------------------------------------ AI model (same weights as ESP32)
+  function predict(x) {
+    const M = window.LAB_MODEL; if (!M) return null;
+    let a = x.map((v, i) => (v - M.mean[i]) / M.scale[i]);
+    M.layers.forEach((L, li) => {
+      const out = L.b.slice();
+      for (let o = 0; o < out.length; o++) for (let i = 0; i < a.length; i++) out[o] += a[i] * L.W[i][o];
+      a = li < M.layers.length - 1 ? out.map(v => Math.max(0, v)) : out;
+    });
+    const mx = Math.max(...a), e = a.map(v => Math.exp(v - mx)), s = e.reduce((p, c) => p + c, 0);
+    return e.map(v => v / s);
+  }
+
+  // ------------------------------------------------------------ log & notification
+  function log(tag, msg) {
+    const li = document.createElement('li');
+    li.innerHTML = `<time>${new Date().toLocaleTimeString()}</time><span class="tag ${tag}">${tag}</span><span></span>`;
+    li.lastChild.textContent = msg;
+    $('log').prepend(li);
+    while ($('log').children.length > 150) $('log').lastChild.remove();
+  }
+  let audio = null, alarmT = null;
+  function alarm(on) {
+    if (!on || !$('soundOn').checked) { clearInterval(alarmT); alarmT = null; return; }
+    if (alarmT) return;
+    try { audio = audio || new AudioContext(); } catch (e) { return; }
+    let hi = false;
+    alarmT = setInterval(() => { const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = (hi = !hi) ? 1300 : 900; g.gain.value = 0.04; o.connect(g).connect(audio.destination);
+      o.start(); o.stop(audio.currentTime + 0.25); }, 320);
+  }
+  function browserNotify(msg) {
+    if ($('soundOn').checked && 'Notification' in window && Notification.permission === 'granted') new Notification('Smart Lab', { body: msg });
+  }
+
+  // ------------------------------------------------------------ render
+  const setBar = (id, p) => { $(id).style.width = (p * 100).toFixed(1) + '%'; $(id + 'T').textContent = Math.round(p * 100) + '%'; };
+  function render(d) {
+    last = d;
+    $('kTemp').innerHTML = `${(+d.temp).toFixed(1)}<small>°C</small>`;
+    $('kTempT').textContent = d.slopeT == null ? '' : `trend ${d.slopeT >= 0 ? '+' : ''}${(+d.slopeT).toFixed(2)} °C/min`;
+    $('kHum').innerHTML = `${Math.round(d.hum)}<small>%</small>`;
+    $('kAir').textContent = d.aqLabel;
+    $('kAirP').textContent = `${Math.round(d.aq)} ppm CO₂-eq`;
+    $('kOcc').textContent = d.occ ? 'Occupied' : 'Vacant';
+    $('kLux').innerHTML = `${Math.round(d.lux)}<small>lx</small>`;
+    $('kStatus').className = 'badge ' + d.status; $('kStatus').textContent = d.status;
+    $('kReason').textContent = d.reason || '';
+
+    const p = [d.pSafe, d.pWarn, d.pCrit];
+    const k = p.indexOf(Math.max(...p));
+    $('aiPred').textContent = CLASSES[k]; $('aiPred').style.color = `var(--${['good', 'warning', 'critical'][k]})`;
+    $('aiConf').textContent = `confidence ${Math.round(p[k] * 100)}%`;
+    setBar('pSafe', p[0]); setBar('pWarn', p[1]); setBar('pCrit', p[2]);
+    $('earlyBox').classList.toggle('show', !!d.early);
+
+    const nt = d.early ? 'WARNING' : d.status;
+    $('notif').className = 'notif ' + nt;
+    $('notifTitle').textContent = d.early ? 'AI: critical conditions expected' : d.status === 'SAFE' ? 'Environment Stable' : d.reason;
+    $('notifTime').textContent = new Date().toLocaleString();
+
+    $('iWifi').className = 'ind on'; $('iWifi').lastChild.textContent = d.rssi ? `${d.rssi} dBm` : 'CONNECTED';
+    $('iFan').className = 'ind' + (d.fan ? ' on' : ''); $('iFan').lastChild.textContent = d.fan ? (d.fanManual ? 'ON (manual)' : 'ON') : 'OFF';
+    $('fanG').setAttribute('class', d.fan ? 'spin' : '');
+    $('iBuzz').className = 'ind' + (d.buzzer ? ' on' : ''); $('iBuzz').lastChild.textContent = d.muted ? 'MUTED' : d.buzzer ? 'ON' : 'OFF';
+    const logging = Date.now() - loggerSeen < 30000;
+    $('iCloud').className = 'ind' + (d.cloud || logging ? ' on' : '');
+    $('iCloud').lastChild.textContent = d.cloud ? 'SYNCED' : logging ? `LOGGED ${loggerRows}` : (mode === 'demo' ? 'DEMO' : 'MQTT only');
+    $('cFan').textContent = d.fanManual ? 'Fan: back to AUTO' : 'Fan: force ON';
+    renderOled(d);
+
+    if (lastStatus !== null && d.status !== lastStatus) {
+      log(d.status, `${lastStatus} → ${d.status}: ${d.reason}`);
+      if (d.status === 'CRITICAL') browserNotify(`CRITICAL: ${d.reason}`);
+    }
+    if (d.early && !lastEarly) { log('AI', `Early warning: CRITICAL predicted within 10 min (p=${Math.round(d.pCrit * 100)}%) - fan started`); browserNotify('AI early warning: critical conditions expected within 10 minutes'); }
+    lastStatus = d.status; lastEarly = !!d.early;
+    alarm(d.status === 'CRITICAL' && !d.muted);
+
+    const t = d.ts && d.ts > 1e9 ? d.ts * 1000 : Date.now();   // demo sends simulated time
+    const prev = history[history.length - 1];
+    if (!prev || t - prev.t >= (mode === 'demo' ? 1000 : 2500)) {
+      history.push({ t, temp: +d.temp, hum: +d.hum, aq: +d.aq, occ: d.occ ? 1 : 0, lux: +d.lux,
+                     status: CLASSES.indexOf(d.status), pred: k, pCrit: +d.pCrit });
+      const cutoff = Date.now() - 7 * 86400e3;
+      while (history.length && history[0].t < cutoff) history.shift();
+      if (history.length > 40000) history.splice(0, history.length - 40000);
+      if (history.length % 20 === 0) store.set('slm-history', history);
+    }
+    drawCharts();
+  }
+
+  function renderOled(d) {
+    const now = new Date();
+    const clk = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const L = [
+      ` ((·))    ${clk.padEnd(9)} ☁`,
+      '─────────────────────',
+      `Temp    : ${(+d.temp).toFixed(1)} C`,
+      `Humidity: ${Math.round(d.hum)} %`,
+      `Air     : ${d.aqLabel} ${Math.round(d.aq)}`,
+      `Occupied: ${d.occ ? 'YES' : 'NO '} ${Math.round(d.lux)}lx`,
+      `Status  : ${d.status}`,
+      '─────────────────────',
+    ];
+    const msg = (d.early ? 'AI:CRITICAL in 10m!' : (d.reason || '')).slice(0, 21);
+    const pad = ' '.repeat(Math.max(0, Math.floor((21 - msg.length) / 2)));
+    const inv = d.status === 'CRITICAL' || d.early;
+    $('oled').innerHTML = L.join('\n').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) + '\n' +
+      (inv ? `<span class="inv">${(pad + msg).padEnd(21)}</span>` : pad + msg);
+  }
+
+  // ------------------------------------------------------------ small-multiple trend charts
+  function drawCharts() {
+    const box = $('charts');
+    const lastT = history.length ? history[history.length - 1].t : 0;
+    const now = Math.max(Date.now(), lastT), t0 = now - range * 1000;
+    const pts = history.filter(h => h.t >= t0);
+    // downsample to ~300 points for long ranges
+    const step = Math.max(1, Math.floor(pts.length / 300));
+    const data = pts.filter((_, i) => i % step === 0);
+    if (!box.children.length) {
+      box.innerHTML = SERIES.map(s => `<div class="mini" data-k="${s.key}"><div class="lbl"><span><span class="sw" style="background:var(${s.color})"></span>${s.name} (${s.unit})</span><b></b></div><svg class="chart"></svg><div class="tooltip"></div></div>`).join('');
+    }
+    SERIES.forEach((s, si) => {
+      const wrap = box.children[si], svg = wrap.querySelector('svg'), tip = wrap.querySelector('.tooltip');
+      const W = svg.clientWidth || 600, H = 78, m = { l: 40, r: 8, t: 6, b: si === SERIES.length - 1 ? 18 : 6 };
+      const iw = W - m.l - m.r, ih = H - m.t - m.b;
+      const vals = data.map(d => d[s.key]);
+      let lo = Math.min(...vals, s.lo ?? Infinity), hi = Math.max(...vals, s.hi ?? -Infinity);
+      if (!isFinite(lo) || !isFinite(hi)) { lo = 0; hi = 1; }
+      const padv = (hi - lo) * 0.12 || 1; lo -= padv; hi += padv;
+      const x = t => m.l + (t - t0) / (range * 1000) * iw, y = v => m.t + ih - (v - lo) / (hi - lo) * ih;
+      let o = '';
+      [lo + padv, (lo + hi) / 2, hi - padv].forEach(v => {
+        o += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="${css('--grid')}"/>`;
+        o += `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="${css('--ink-3')}">${s.fmt(v)}</text>`;
+      });
+      if (s.hi != null) o += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(s.hi)}" y2="${y(s.hi)}" stroke="${css('--warning')}" stroke-dasharray="4 4" stroke-width="1.2"/>`;
+      if (s.lo != null) o += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(s.lo)}" y2="${y(s.lo)}" stroke="${css('--warning')}" stroke-dasharray="4 4" stroke-width="1.2"/>`;
+      if (m.b > 10) {
+        const lab = range <= 3600 ? 10 * 60e3 : range <= 86400 ? 3 * 3600e3 : 86400e3;
+        for (let tt = Math.ceil(t0 / lab) * lab; tt <= now; tt += lab) {
+          const dd = new Date(tt);
+          const txt = range > 86400 ? dd.toLocaleDateString([], { weekday: 'short' }) : dd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          o += `<text x="${x(tt)}" y="${H - 4}" text-anchor="middle" font-size="10" fill="${css('--ink-3')}">${txt}</text>`;
+        }
+      }
+      if (data.length > 1) {
+        o += `<polyline points="${data.map(d => `${x(d.t).toFixed(1)},${y(d[s.key]).toFixed(1)}`).join(' ')}" fill="none" stroke="${css(s.color)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+        const lp = data[data.length - 1];
+        o += `<circle cx="${x(lp.t)}" cy="${y(lp[s.key])}" r="3.5" fill="${css(s.color)}" stroke="${css('--surface')}" stroke-width="2"/>`;
+        wrap.querySelector('.lbl b').textContent = `${s.fmt(lp[s.key])} ${s.unit}`;
+      }
+      o += `<line class="hl" y1="${m.t}" y2="${m.t + ih}" stroke="${css('--ink-3')}" style="display:none"/>`;
+      svg.innerHTML = o;
+      svg.onmousemove = ev => {
+        if (!data.length) return;
+        const r = svg.getBoundingClientRect(), tt = t0 + (ev.clientX - r.left - m.l) / iw * range * 1000;
+        let b = data[0]; for (const d of data) if (Math.abs(d.t - tt) < Math.abs(b.t - tt)) b = d;
+        const hl = svg.querySelector('.hl'); hl.style.display = ''; hl.setAttribute('x1', x(b.t)); hl.setAttribute('x2', x(b.t));
+        tip.textContent = `${new Date(b.t).toLocaleTimeString()} · ${s.fmt(b[s.key])} ${s.unit} · ${CLASSES[b.status]}`;
+        tip.style.left = x(b.t) + 'px'; tip.style.top = (y(b[s.key]) + 18) + 'px'; tip.style.opacity = 1;
+      };
+      svg.onmouseleave = () => { tip.style.opacity = 0; const hl = svg.querySelector('.hl'); if (hl) hl.style.display = 'none'; };
+    });
+    if ($('tableWrap').closest('details').open) renderTable();
+  }
+  function renderTable() {
+    $('tableWrap').innerHTML = '<table><thead><tr><th>Time</th><th>°C</th><th>%RH</th><th>ppm</th><th>Occ</th><th>lx</th><th>Status</th><th>AI</th></tr></thead><tbody>' +
+      history.slice(-80).reverse().map(h => `<tr><td>${new Date(h.t).toLocaleTimeString()}</td><td>${h.temp.toFixed(1)}</td><td>${h.hum.toFixed(0)}</td><td>${Math.round(h.aq)}</td><td>${h.occ}</td><td>${Math.round(h.lux)}</td><td>${CLASSES[h.status]}</td><td>${CLASSES[h.pred]}</td></tr>`).join('') + '</tbody></table>';
+  }
+  $('tableWrap').closest('details').addEventListener('toggle', renderTable);
+  $('ranges').onclick = e => { const b = e.target.closest('button'); if (!b) return;
+    range = +b.dataset.r; [...$('ranges').children].forEach(c => c.classList.toggle('on', c === b)); drawCharts(); };
+  addEventListener('resize', drawCharts);
+  $('btnCsv').onclick = () => {
+    const rows = ['timestamp,temperature,humidity,air_quality_ppm,occupancy,light_lux,status_now,ai_pred,p_critical',
+      ...history.map(h => [new Date(h.t).toISOString(), h.temp, h.hum, h.aq, h.occ, h.lux, h.status, h.pred, h.pCrit].join(','))];
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' }));
+    a.download = 'smartlab_history.csv'; a.click();
+  };
+  $('btnClear').onclick = () => { history = []; store.set('slm-history', []); drawCharts(); };
+
+  // ------------------------------------------------------------ MQTT live
+  function setConn(cls, txt) { $('connPill').className = 'pill ' + cls; $('connText').textContent = txt; }
+  function connect() {
+    stopDemo();
+    if (client) { client.end(true); client = null; }
+    if (!window.mqtt) { log('WARNING', 'MQTT library not loaded (offline?) - use demo mode'); return; }
+    deviceId = $('deviceId').value.trim() || 'smartlab-cse24'; store.set('slm-device', deviceId);
+    setConn('', 'Connecting…');
+    client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', { clientId: 'slm-dash-' + Math.random().toString(16).slice(2, 10), reconnectPeriod: 4000 });
+    client.on('connect', () => { mode = 'mqtt'; setConn('live', 'Connected · waiting for device');
+      client.subscribe([`smartlab/${deviceId}/data`, `smartlab/${deviceId}/alert`, `smartlab/${deviceId}/logger`]);
+      log('INFO', `Listening on smartlab/${deviceId}/#`); });
+    client.on('message', (topic, payload) => {
+      let d; try { d = JSON.parse(payload.toString()); } catch (e) { return; }
+      if (topic.endsWith('/alert')) { log(d.status || 'INFO', d.msg || ''); return; }
+      if (topic.endsWith('/logger')) { loggerSeen = Date.now(); loggerRows = d.rows; return; }
+      if (d.offline) { setConn('', 'Device offline'); return; }
+      setConn('live', 'Live · ' + deviceId + (d.virtual ? ' (virtual ESP32)' : ''));
+      $('demoBar').classList.toggle('show', !!d.virtual);
+      render(d);
+    });
+    client.on('error', e => log('WARNING', 'MQTT error: ' + e.message));
+    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  }
+  function send(cmd) {
+    if (mode === 'demo') { demoCmd(cmd); return; }
+    if (!client || !client.connected) { log('WARNING', 'Not connected'); return; }
+    client.publish(`smartlab/${deviceId}/cmd`, cmd); log('INFO', 'Command sent: ' + cmd);
+  }
+  $('btnConnect').onclick = connect;
+  $('cFan').onclick = () => send(last && last.fanManual ? 'fan_auto' : 'fan_on');
+  $('cMute').onclick = () => send('mute');
+  $('cTest').onclick = () => send('test');
+
+  // ------------------------------------------------------------ ThingSpeak cloud history
+  $('btnTs').onclick = async () => {
+    const ch = $('tsChannel').value.trim(), key = $('tsKey').value.trim();
+    if (!ch) return; store.set('slm-ts-channel', ch);
+    try {
+      const r = await fetch(`https://api.thingspeak.com/channels/${encodeURIComponent(ch)}/feeds.json?results=8000${key ? '&api_key=' + encodeURIComponent(key) : ''}`);
+      const j = await r.json();
+      const rows = (j.feeds || []).map(f => ({ t: Date.parse(f.created_at), temp: +f.field1, hum: +f.field2, aq: +f.field3,
+        occ: +f.field4, lux: +f.field5, status: +f.field6 || 0, pred: +f.field7 || 0, pCrit: +f.field8 || 0 })).filter(r => isFinite(r.temp));
+      history = [...rows, ...history.filter(h => !rows.length || h.t > rows[rows.length - 1].t)].sort((a, b) => a.t - b.t);
+      log('INFO', `Loaded ${rows.length} records from ThingSpeak channel ${ch}`); drawCharts();
+    } catch (e) { log('WARNING', 'ThingSpeak load failed: ' + e.message); }
+  };
+
+  // ------------------------------------------------------------ Demo mode: lab physics + the real model
+  let sim = null, simT = null;
+  const HIST = 11;
+  function startDemo() {
+    if (client) { client.end(true); client = null; }
+    mode = 'demo'; setConn('demo', 'Demo mode'); $('demoBar').classList.add('show');
+    history = []; lastStatus = null;
+    sim = { temp: 23.2, hum: 46, co2: 460, people: 0, lux: 60, fanManual: false, muted: 0, hvacFail: 0, chem: 0,
+            lampFail: false, hist: [], minute: 0, test: 0, start: Date.now() };
+    clearInterval(simT); simT = setInterval(stepDemo, 1000); stepDemo();
+    log('INFO', 'Demo started - press a scenario button');
+  }
+  function stopDemo() { clearInterval(simT); simT = null; $('demoBar').classList.remove('show'); if (mode === 'demo') mode = 'off'; }
+  function statusOf(t, h, aq, occ, lux) {
+    if (t > 32) return [2, 'High temperature!']; if (t < 15) return [2, 'Low temperature!'];
+    if (h > 70) return [2, 'Humidity too high!']; if (h < 20) return [2, 'Humidity too low!'];
+    if (aq > 2000) return [2, 'Hazardous air!']; if (aq > 1000) return [1, 'Poor air quality'];
+    if (t > 27 || t < 18) return [1, 'Temperature abnormal']; if (h > 60 || h < 30) return [1, 'Humidity abnormal'];
+    if (occ && lux < 150) return [1, 'Insufficient light'];
+    return [0, !occ && lux > 300 ? 'Lab empty, lights on' : 'Environment Stable'];
+  }
+  const aqLabel = p => p < 800 ? 'Good' : p < 1000 ? 'Moderate' : p < 2000 ? 'Poor' : 'Hazardous';
+  function stepDemo() {
+    const s = sim; s.minute++;
+    const occ = s.people > 0;
+    const fanPrev = s.fan || false;
+    s.co2 += s.people * 2.0 * (0.9 + Math.random() * 0.2) - (0.012 + (fanPrev ? 0.085 : 0)) * (s.co2 - 420) + s.chem;
+    s.co2 = Math.max(400, s.co2);
+    if (s.chem > 0) s.chem = Math.max(0, s.chem - 6);
+    if (s.hvacFail > 0) { s.temp += 0.16 + 0.006 * s.people; s.hvacFail--; }
+    else s.temp += 0.06 * (22.8 - s.temp) + (occ ? 0.03 + 0.004 * s.people : 0);
+    if (fanPrev) s.temp -= 0.008 * Math.max(0, s.temp - 24);
+    s.hum += 0.05 * (46 + 0.25 * s.people - s.hum) + (Math.random() - 0.5) * 0.4;
+    s.lux = (occ && !s.lampFail ? 450 : 0) + 60 + (Math.random() - 0.5) * 10;
+    const t = s.temp + (Math.random() - .5) * 0.2, h = s.hum, aq = s.co2 * (1 + (Math.random() - .5) * 0.02), lux = s.lux;
+    s.hist.push([t, h, aq]); if (s.hist.length > HIST) s.hist.shift();
+    const n = s.hist.length - 1, o = s.hist[0];
+    const slopeT = n ? (t - o[0]) / n : 0, slopeH = n ? (h - o[1]) / n : 0, slopeA = n ? (aq - o[2]) / n : 0;
+    let [st, reason] = statusOf(t, h, aq, occ, lux);
+    // same as firmware: escalate at once, drop only after 5 lab-minutes lower
+    if (st >= (s.st ?? 0)) { s.st = st; s.reason = reason; s.lower = 0; }
+    else if (++s.lower >= 5) { s.st = st; s.reason = reason; s.lower = 0; }
+    st = s.st; reason = s.reason;
+    const p = predict([t, h, aq, occ ? 1 : 0, lux, slopeT, slopeA, slopeH]) || [1, 0, 0];
+    const k = p.indexOf(Math.max(...p));
+    const early = k === 2 && p[2] >= 0.6 && st !== 2;
+    const airOrHeat = aq > 900 || t > 26.5 || h > 58;
+    s.fan = s.fanManual || (st >= 1 && airOrHeat) || early;
+    const muted = s.muted > 0; if (muted) s.muted--;
+    render({ temp: t, hum: h, aq, aqLabel: aqLabel(aq), occ, lux, status: CLASSES[st], reason,
+      pSafe: p[0], pWarn: p[1], pCrit: p[2], early, slopeT, slopeA, fan: s.fan, fanManual: s.fanManual,
+      buzzer: !muted && (st === 2 || early), muted, cloud: false, rssi: -58,
+      ts: (s.start + s.minute * 60000) / 1000 });
+  }
+  function demoCmd(c) {
+    if (c === 'fan_on') sim.fanManual = true; if (c === 'fan_auto') sim.fanManual = false;
+    if (c === 'mute') { sim.muted = 60; log('INFO', 'Buzzer muted for 60 s'); }
+    if (c === 'test') log('INFO', 'Self-test: LEDs, buzzer, fan relay cycled');
+  }
+  $('demoBar').onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const ev = b.dataset.ev;
+    if (mode === 'mqtt') { send('scenario:' + ev); return; }   // drives the virtual ESP32
+    if (!sim) return;
+    if (ev === 'session') { sim.people = 28; log('INFO', 'Scenario: 28 students enter the lab'); }
+    if (ev === 'chemical') { sim.chem = 240; log('INFO', 'Scenario: solvent fumes released'); }
+    if (ev === 'hvac') { sim.hvacFail = 70; log('INFO', 'Scenario: air-conditioning failure'); }
+    if (ev === 'lights') { sim.lampFail = !sim.lampFail; log('INFO', sim.lampFail ? 'Scenario: lights failed' : 'Lights restored'); }
+    if (ev === 'clear') { sim.people = 0; sim.hvacFail = 0; log('INFO', 'Scenario: everyone leaves, AC restored'); }
+  };
+  $('btnDemo').onclick = () => mode === 'demo' ? (stopDemo(), setConn('', 'Offline')) : startDemo();
+
+  drawCharts();
+  if (location.hash === '#demo') startDemo();
+  if (location.hash === '#live') connect();     // used by start_all.bat
+  if (location.hash.includes('light')) document.documentElement.dataset.theme = 'light';
+  if (location.hash.startsWith('#autoplay')) {          // hands-free presentation: session, then AC failure
+    startDemo();
+    const click = ev => document.querySelector(`[data-ev=${ev}]`).click();
+    setTimeout(() => click('session'), 3000);
+    setTimeout(() => click('hvac'), 30000);
+    setTimeout(() => click('clear'), 110000);
+  }
+})();
+</script>
+</body>
+</html>

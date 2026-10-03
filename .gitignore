@@ -1,0 +1,17 @@
+# local runtime data (created by cloud/mqtt_logger.py)
+*.db
+cloud/training.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# Blender
+*.blend1
+*.mp4
+gas_cache/
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.vscode/
