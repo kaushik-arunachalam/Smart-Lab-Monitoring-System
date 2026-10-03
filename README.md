@@ -1,7 +1,5 @@
 # Smart Laboratory Environment Monitoring System
 **An IoT Based Embedded System with AI Driven Environmental Safety Analysis**
-M.A. Kaushik (CH.SC.U4CSE24123) · Deepak SN (CH.SC.U4CSE24112)
-
 Everything in the Phase 1 plan, built and tested in software (no hardware needed yet).
 
 | Folder | What it is | Tool |
